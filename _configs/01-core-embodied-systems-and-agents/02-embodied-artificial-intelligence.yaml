@@ -1,0 +1,22 @@
+dblp:
+  url: https://dblp.org/search/publ/api?q={}&format=json&h=1000
+  topics:
+    - "embodied%20artificial%20intelligence%20venue%3ANeurIPS%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AICML%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AICLR%3A"
+    - "embodied%20artificial%20intelligence%20venue%3ACVPR%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AICCV%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AECCV%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AAAAI%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AIJCAI%3A"
+    - "embodied%20artificial%20intelligence%20venue%3ACoRL%3A"
+    - "embodied%20artificial%20intelligence%20venue%3ARSS%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AICRA%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AIROS%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AIJRR%3A"
+    - "embodied%20artificial%20intelligence%20venue%3ATRO%3A"
+    - "embodied%20artificial%20intelligence%20venue%3ARA-L%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AAutonomous%20Robots%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AScience%20Robotics%3A"
+    - "embodied%20artificial%20intelligence%20venue%3AJFR%3A"
+    - "embodied%20artificial%20intelligence%20venue%3ATPAMI%3A"

@@ -1,0 +1,451 @@
+import subprocess
+import yaml
+import os
+import re
+
+def slugify(text: str):
+    """
+    GitHub-style anchor slug.
+    """
+    text = text.lower()
+    text = re.sub(r"[^\w\s-]", "", text)   # remove punctuation
+    text = re.sub(r"\s+", "-", text)       # spaces → hyphen
+    return text.strip("-")
+
+def generate_toc(data, collapsed=True):
+    lines = []
+
+    if collapsed:
+        lines.extend([
+            "<details markdown=\"1\">",
+            "<summary><strong>Table of Contents</strong></summary>",
+            "",
+        ])
+    else:
+        lines.extend(["## Table of Contents", ""])
+
+    for sec in data["section"]:
+        venue = sec["title"]
+        venue_slug = slugify(venue)
+
+        # Venue entry (always on its own line)
+        lines.extend([
+            '<details markdown="1">',
+            f'<summary>{venue}</summary>',
+            '',
+        ])
+
+        years = sorted(data.get(venue, {}).keys(), reverse=True)
+        for year in years:
+            lines.append(f"  - [{year}](#{venue_slug}-{year})")
+
+        lines.extend([
+            '',
+            '</details>',
+            '',
+        ])
+
+    if collapsed:
+        lines.extend([
+            "</details>",
+            ""
+        ])
+
+    return "\n".join(lines)
+
+
+def simple_yaml_to_mdtable(papers):
+    lines = []
+    lines.append("| Title | Venue | Year | Link |")
+    lines.append("|------|-------|------|------|")
+
+    for p in papers:
+        title = p["title"].replace("|", "\\|")
+        venue = p["venue"]
+        year = p["year"]
+        link = f"[Link]({p['link']})" if p.get("link") else ""
+
+        lines.append(f"| {title} | {venue} | {year} | {link} |")
+
+    return "\n".join(lines)
+
+
+def read_mdfile(md_file: str):
+    """Read markdown file"""
+    with open(md_file, "r", encoding="utf-8") as f:
+        md_str = f.read()
+    return md_str
+
+
+def write_mdfile(md_file: str, md_str: str):
+    """Write markdown file"""
+    with open(md_file, "w", encoding="utf-8") as f:
+        f.write(md_str)
+
+
+def read_yaml(yaml_file):
+    """Read yaml file"""
+    with open(yaml_file, "r", encoding="utf-8") as f:
+        data = yaml.load(f, Loader=yaml.FullLoader)
+    return data
+
+
+def write_yaml(yaml_file, data):
+    """Write yaml file"""
+    with open(yaml_file, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, allow_unicode=True, sort_keys=False)
+
+
+def get_substr_before(src: str, split_str: str):
+    """Get substring before split_str"""
+    idx = src.find(split_str)
+    if idx == -1:
+        return src
+    return src[:idx]
+
+
+def get_substr_after(src: str, split_str: str):
+    """Get substring after split_str"""
+    idx = src.find(split_str)
+    if idx == -1:
+        return src
+    return src[idx + len(split_str) :]
+
+
+def get_content(src: str, start_comment: str, end_comment: str):
+    """Get content between start and end comment"""
+    pattern = f"{start_comment}[\\s\\S]+{end_comment}"
+
+    if re.search(pattern, src) is None:
+        print(
+            f"can not find comment in src, please check it, it should be {start_comment} and {end_comment}"
+        )
+
+    return re.search(pattern, src).group(0)
+
+
+def replace_content(src, content, start, end):
+    """
+    Replace content between start and end markers.
+    Auto-create markers if missing.
+    """
+
+    # Normal replacement
+    if start in src and end in src:
+        pre, rest = src.split(start, 1)
+        _, post = rest.split(end, 1)
+        return pre + start + "\n" + content + "\n" + end + post
+
+    marker_block = f"{start}\n{content}\n{end}\n"
+
+    # --- SPECIAL CASE: TOC goes to top ---
+    if start == "<!-- START:TOC -->":
+        return marker_block + "\n" + src
+
+    # --- Default behavior for venue sections ---
+    section = start.replace("<!-- START:", "").replace(" -->", "").strip()
+
+    lines = src.splitlines()
+    out = []
+    inserted = False
+
+    for line in lines:
+        out.append(line)
+        if not inserted and line.strip() == f"## {section}":
+            out.append("")
+            out.append(marker_block)
+            inserted = True
+
+    if not inserted:
+        out.append(f"\n## {section}")
+        out.append(marker_block)
+
+    return "\n".join(out)
+
+
+def parse_header(header_str: str):
+    """Parse header string to yaml key"""
+    # to lower case || TL;DR -> tldr || " " -> "_"
+    return header_str.strip().lower().replace(" ", "_").replace(";", "")
+
+
+def mdtable_to_yaml(table_content: str, md_ref: dict):
+    """Convert markdown table to yaml"""
+
+    # parse table to list
+    table_list = []
+    for line in table_content.splitlines():
+        if line.startswith("|"):  # skip empty line
+            table_list.append(line.strip("|").strip().split("|"))
+
+    # check table exist
+    if len(table_list) == 0:
+        return {}, md_ref
+
+    # get table header and body
+    table_header = table_list[0]  # header
+    table_line = table_list[1]  # line length
+    table_body = table_list[2:]  # body
+
+    header_alias = {}
+    for i, header in enumerate(table_header):
+        # parse header to yaml key
+        header_alias[i] = parse_header(header)
+
+    # parse table body to dict
+    data = {}
+    data["header"] = {}
+    for i, header in enumerate(table_header):
+        # save header
+        data["header"][header_alias[i]] = header
+
+    data["length"] = {}
+    for i, line in enumerate(table_line):
+        # count and save line length
+        data["length"][header_alias[i]] = len(line.strip())
+
+    data["body"] = []
+    for line in table_body:
+        line_dict = {}
+        for i, item in enumerate(line):
+            if header_alias[i] == "tldr" and len(item.strip()) > 0:
+                # special handle for tldr
+                # abbr[^abbr] -> abbr || " " -> "-" || "+" -> "plus"
+                abbr = (
+                    item.strip()
+                    .split("[")[0]
+                    .strip()
+                    .replace(" ", "-")
+                    .replace("+", "plus")
+                )
+                if not abbr in md_ref:
+                    # can not find abbr in md_ref
+                    print(f"can not find {abbr} in md_ref")
+                    # default value
+                    md_ref[abbr] = "TBC"
+
+                # save content
+                line_dict[header_alias[i]] = f"{abbr}: {md_ref[abbr]}"
+                continue
+
+            if header_alias[i] == "materials":
+                # special handle for materials
+
+                # get links in materials
+                get_links = re.findall(r"\[.*?\]\(.*?\)", item.strip())
+
+                links = {}
+                for link in get_links:
+                    # parse link to dict, split by "]("
+                    # [[link]](url) || [[link](url)] || [link](url) -> {link: url}
+                    text = get_substr_before(link, "](").strip("[]").strip()
+                    url = get_substr_after(link, "](").strip(")").strip()
+                    # to upper case
+                    links[text.upper()] = url
+
+                line_dict[header_alias[i]] = links
+                continue
+
+            # other cases
+            line_dict[header_alias[i]] = item.strip()
+
+        data["body"].append(line_dict)
+
+    return data, md_ref
+
+
+def yaml_to_mdtable(yaml_data: dict, md_ref: str):
+    """Convert yaml to markdown table"""
+
+    # check yaml data exist
+    if len(yaml_data) == 0:
+        return "", md_ref
+
+    # get table header and body
+    table_header = yaml_data["header"]  # header
+    table_line = yaml_data["length"]  # line length
+    table_body = yaml_data["body"]  # body
+
+    # parse table body to dict
+    table_list = []
+
+    # header
+    table_list.append("|" + "|".join(table_header.values()) + "|")
+
+    # line length
+    table_list.append(
+        "| " + " | ".join(["-" * line for line in table_line.values()]) + " |"
+    )
+
+    for line in table_body:
+        # remove tldr
+        if "tldr" in line:
+            line.pop("tldr")
+
+        for key in table_header.keys():
+            if key == "tldr":
+                continue
+
+                # special handle for tldr
+                # split by first ":"
+                abbr = get_substr_before(line[key], ":").strip()
+
+                if len(abbr) > 0:
+                    # save abbr to md_ref
+                    md_ref += f"[^{abbr}]: {get_substr_after(line[key], ':').strip()}\n"
+                    # revert "plus" to "+"
+                    line[key] = f"{abbr.replace('plus', '+')}[^{abbr}]"
+                else:
+                    # empty abbr
+                    line[key] = ""
+
+            if key == "link":
+                # special handle for materials
+                links = []
+
+                # if type(line[key]) is not dict:
+                #     # wrong type
+                #     print(f"materials is str, please check it: {line[key]}")
+                # else:
+                #     # parse dict to str
+                #     for text, url in line[key].items():
+                #         links.append(f"[[{text}]({url})]")
+                line[key] = " ".join(links)
+
+        # other cases
+        table_list.append("| " + " | ".join([str(l) for l in line.values()]) + " |")
+
+    return "\n".join(table_list), md_ref
+
+def yaml_block_to_mdtable(header, body):
+    """
+    header: dict of column name → display name (e.g., {"title": "Title"})
+    body: list of row dicts
+    """
+    if not body:
+        return "*No papers found.*"
+
+    columns = list(header.keys())
+
+    # Create Header Row
+    lines = []
+    lines.append("| " + " | ".join(header[c].strip() for c in columns) + " |")
+    lines.append("| " + " | ".join(["---"] * len(columns)) + " |")
+
+    # Create Body Rows
+    def link_label(row, link_value):
+        arxiv_id = row.get("arxiv_id")
+        if arxiv_id:
+            return arxiv_id
+        if isinstance(link_value, str) and link_value:
+            match = re.search(r"arxiv\\.org/(?:abs|pdf)/([^?#/]+)", link_value)
+            if match:
+                return match.group(1).split("v")[0]
+        return "Link"
+
+    for row in body:
+        vals = []
+        for c in columns:
+            v = row.get(c, "")
+            # If the column is 'link', 'url', or 'ee', format as Markdown link
+            if c in ["link", "url", "ee"] and v:
+                v = f"[{link_label(row, v)}]({v})"
+            vals.append(str(v).replace("|", "\\|")) # Escape pipes in text
+        lines.append("| " + " | ".join(vals) + " |")
+
+    return "\n".join(lines)
+
+def yaml_block_to_htmltable(header, body):
+    if not body:
+        return "<p><em>No papers found.</em></p>"
+
+    cols = list(header.keys())
+
+    lines = []
+    lines.append('<table class="paper-table">')
+
+    # --- Column widths ---
+    lines.append("<colgroup>")
+    lines.append('<col style="width: 60%">')  # Title
+    lines.append('<col style="width: 15%">')  # Venue
+    lines.append('<col style="width: 15%">')  # Year
+    lines.append('<col style="width: 10%">')   # Link
+    lines.append("</colgroup>")
+
+    lines.append("<thead><tr>")
+
+    for c in cols:
+        lines.append(f"<th>{header[c]}</th>")
+
+    lines.append("</tr></thead>")
+    lines.append("<tbody>")
+
+    def link_label(row, link_value):
+        arxiv_id = row.get("arxiv_id")
+        if arxiv_id:
+            return arxiv_id
+        if isinstance(link_value, str) and link_value:
+            match = re.search(r"arxiv\\.org/(?:abs|pdf)/([^?#/]+)", link_value)
+            if match:
+                return match.group(1).split("v")[0]
+        return "Link"
+
+    for row in body:
+        lines.append("<tr>")
+        for c in cols:
+            v = row.get(c, "")
+            if c in ["link", "url", "ee"] and v:
+                v = f'<a href="{v}">{link_label(row, v)}</a>'
+            lines.append(f"<td>{v}</td>")
+        lines.append("</tr>")
+
+    lines.append("</tbody></table>")
+    return "\n".join(lines)
+
+def get_mdref(md_str: str, start_comment: str, end_comment: str):
+    """Get md ref from md_str"""
+    ref_content = get_content(md_str, start_comment, end_comment)
+
+    ref_dict = {}
+    for line in ref_content.splitlines():
+        # skip empty line
+        if line.startswith("["):
+            # get abbr and content
+            # [^abbr]: content -> {abbr: content}
+            # abbr: " " -> "-" || "+" -> "plus" || "^" -> "" || "[]" -> ""
+            # split by first "]:"
+            abbr = (
+                get_substr_before(line, "]:")
+                .strip("[]")
+                .replace("^", "")
+                .strip()
+                .replace(" ", "-")
+                .replace("+", "plus")
+            )
+            # split by first "]:"
+            cont = get_substr_after(line, "]:").strip()
+            if len(cont) == 0:
+                # empty content
+                print(f"can not find content for {abbr}")
+                # default value
+                cont = "TBC"
+            ref_dict[abbr] = cont
+
+    return ref_dict
+
+
+def write_mdref(md_ref: dict):
+    """Write md ref to README.md"""
+    ref_list = []
+    for key, value in md_ref.items():
+        # parse [^abbr]: content
+        ref_list.append(f"[^{key}]: {value}")
+
+    return "\n".join(ref_list)
+
+
+def get_git_log_time(file_path: str):
+    """Get git log time"""
+    cmd = f"git log -1 --format=%cd --date=iso {file_path}"
+    resp = subprocess.check_output(cmd, shell=True)
+    return resp.decode("utf-8").strip()
