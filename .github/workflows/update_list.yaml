@@ -1,0 +1,99 @@
+name: update-paper-list
+
+on:
+  workflow_run:
+    workflows: ["search-dblp"]
+    types: [completed]
+  workflow_dispatch:
+  # push:
+  #   branches: ['main']
+    
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  update:
+    # if: ${{ github.event_name == 'workflow_dispatch' || ( github.event.workflow_run.conclusion == 'success' && contains(github.event.workflow_run.head_commit.message, 'new papers added') ) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3600
+    env:
+      TZ: "Asia/Kolkata"
+      RUN_ENV: "prod" # within ['prod', 'dev']
+      GH_USER: ${{ github.repository_owner }}
+      PYTHONDONTWRITEBYTECODE: 1
+
+    steps:
+      # ------------------------------------------------
+      # Checkout first to decide whether update is needed
+      # ------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # required for HEAD~1
+
+      - name: Decide whether update is needed
+        id: decide
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch origin main --depth=2
+          if git diff --name-only HEAD~1 HEAD | grep -q '^_data/.*\.ya\?ml$'; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Exit if no data changes
+        if: steps.decide.outputs.proceed != 'true'
+        run: |
+          echo "No _data changes detected. Skipping update."
+          exit 0
+
+      - name: Debug workflow_run context
+        run: |
+          echo "Event Name: ${{ github.event_name }}"
+          echo "Workflow Run Conclusion: ${{ github.event.workflow_run.conclusion }}"
+          echo "Head Commit Message: ${{ github.event.workflow_run.head_commit.message }}"
+
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; fi
+
+      - name: Update readme
+        run: |
+          cd scripts && python3 main.py merge_md_yaml
+
+      - name: Copy README.md to docs/index.md
+        run: |
+          mkdir -p docs
+          cp README.md docs/index.md
+
+      - name: Count papers per topic
+        run: |
+          cd scripts
+          python3 count_topics.py
+
+      - name: Generate topic distribution bar chart
+        run: |
+          cd scripts
+          python3 generate_topic_barchart.py
+      ################################################################################
+      # COMMIT CHANGES IF ANY
+      ################################################################################
+      - name: Get date time
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit Updated
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "auto update @ ${{ steps.date.outputs.date }} ${{ env.TZ }}"
+
