@@ -18,7 +18,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 7200
     env:
-      TZ: "Asia/Kolkata"
+      TZ: "Australia/Sydney"
       RUN_ENV: "prod" # within ['prod', 'dev']
       GH_USER: ${{ github.repository_owner }}
       PYTHONDONTWRITEBYTECODE: 1

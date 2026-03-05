@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
     env:
-      TZ: "Asia/Kolkata"
+      TZ: "Australia/Sydney"
       RUN_ENV: "prod" # within ['prod', 'dev']
       GH_USER: ${{ github.repository_owner }}
       PYTHONDONTWRITEBYTECODE: 1

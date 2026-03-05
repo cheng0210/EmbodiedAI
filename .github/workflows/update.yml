@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   update:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
-      TZ: "Asia/Kolkata"
+      TZ: "Australia/Sydney"
       RUN_ENV: "prod" # within ['prod', 'dev']
       GH_USER: ${{ github.repository_owner }}
       PYTHONDONTWRITEBYTECODE: 1
