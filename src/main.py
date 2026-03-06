@@ -32,19 +32,38 @@ class Scaffold:
     def run(
         self,
         env: str = "dev",
-        global_cfg_path: str = "./../config.yaml",
+        global_cfg_path: str | None = None,
         dblp: bool = True,
         arxiv: bool = True,
         no_dblp: bool = False,
         no_arxiv: bool = False,
     ):
+        if global_cfg_path:
+            cfg_candidate = Path(global_cfg_path).expanduser()
+            if not cfg_candidate.is_absolute():
+                cfg_candidate = (Path.cwd() / cfg_candidate).resolve()
+            else:
+                cfg_candidate = cfg_candidate.resolve()
+        else:
+            default_candidates = [
+                self.root_dir / "_config.yaml",
+                self.root_dir / "config.yaml",
+            ]
+            cfg_candidate = next((p for p in default_candidates if p.exists()), default_candidates[0])
+
+        if not cfg_candidate.exists():
+            raise FileNotFoundError(
+                f"Global config file not found: {cfg_candidate}. "
+                "Please pass --global_cfg_path to a valid config file."
+            )
+
         # Initialize global settings (logging, etc)
-        global_cfg = init(cfg_path=global_cfg_path)
+        global_cfg = init(cfg_path=str(cfg_candidate))
         # print(global_cfg)
         # {'cache_path': PosixPath('../cached'), 'dblp': {'topics': ['federate%20venue%3AICML%3A'], 'url': 'https://dblp.org/search/publ/api?q={}&format=json&h=1000'}}
         
-        # 1. Iterate through every yaml in _configs
-        config_files = list(self.configs_dir.glob("*.yaml"))
+        # 1. Iterate through every yaml in _configs (recursive)
+        config_files = sorted(self.configs_dir.rglob("*.yaml"))
         # print(config_files)
         if not config_files:
             logger.warning(f"No config files found in {self.configs_dir}")
